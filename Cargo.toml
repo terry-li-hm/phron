@@ -1,0 +1,33 @@
+[package]
+name = "phron"
+version = "0.1.0"
+edition = "2021"
+description = "Personal AI life coach: health monitoring, overnight research, and proactive nudges"
+license = "MIT"
+repository = "https://github.com/terry-li-hm/phron"
+keywords = ["cli", "ai", "oura", "coach"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "comes"
+path = "src/main.rs"
+
+[workspace]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+owo-colors = "4"
+dirs = "5"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

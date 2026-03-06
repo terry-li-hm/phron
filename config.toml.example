@@ -1,0 +1,19 @@
+[vault]
+path = "~/notes"
+overnight_dir = "Daily Intelligence"
+
+[llm]
+synthesis_model = "claude-sonnet-4-6"
+research_model = "google/gemini-flash-1.5"
+
+[research]
+topics = [
+  "HSBC AI initiatives and GenAI strategy",
+  "FS regulatory AI updates HKMA MAS FCA",
+  "Capco consulting publications and case studies",
+  "McKinsey BCG Deloitte AI consulting moves"
+]
+
+[thresholds]
+health_red = 50
+health_yellow = 70
