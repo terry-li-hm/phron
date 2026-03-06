@@ -23,6 +23,14 @@ struct Message {
     chat: Chat,
     text: Option<String>,
     voice: Option<Voice>,
+    document: Option<Document>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Document {
+    file_id: String,
+    file_name: Option<String>,
+    mime_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,30 +118,31 @@ impl Bot {
         Ok(())
     }
 
-    fn download_voice(&self, file_id: &str) -> Result<()> {
-        // 1. Get file path
+    fn download_file(&self, file_id: &str, dest_path: &str) -> Result<()> {
         let url = format!("https://api.telegram.org/bot{}/getFile", self.token);
-        let resp = self.client.get(&url)
+        let body: TgResponse<File> = self.client.get(&url)
             .query(&[("file_id", file_id)])
-            .send()
-            .context("Failed to call getFile")?;
-        
-        let body: TgResponse<File> = resp.json().context("Failed to parse getFile response")?;
-        if !body.ok || body.result.is_none() {
-            anyhow::bail!("Failed to get file path: {}", body.description.unwrap_or_default());
-        }
+            .send().context("getFile request failed")?
+            .json().context("getFile parse failed")?;
 
-        let file_path = body.result.unwrap().file_path.context("No file path in getFile response")?;
-        
-        // 2. Download file
+        if !body.ok || body.result.is_none() {
+            anyhow::bail!("getFile failed: {}", body.description.unwrap_or_default());
+        }
+        let file_path = body.result.unwrap().file_path
+            .context("No file_path in getFile response")?;
+
         let download_url = format!("https://api.telegram.org/file/bot{}/{}", self.token, file_path);
-        let mut resp = self.client.get(&download_url).send().context("Failed to download voice file")?;
-        
-        let target_path = format!("/tmp/comes-audio-{}.ogg", file_id);
-        let mut file = fs::File::create(&target_path).context("Failed to create local voice file")?;
-        resp.copy_to(&mut file).context("Failed to save voice file")?;
-        
+        let mut resp = self.client.get(&download_url).send()
+            .context("File download request failed")?;
+        let mut file = fs::File::create(dest_path)
+            .context("Failed to create destination file")?;
+        resp.copy_to(&mut file).context("Failed to write file")?;
         Ok(())
+    }
+
+    fn download_voice(&self, file_id: &str) -> Result<()> {
+        let dest = format!("/tmp/comes-audio-{}.ogg", file_id);
+        self.download_file(file_id, &dest)
     }
 }
 
@@ -157,6 +166,8 @@ fn main() {
                             handle_text_command(&bot, chat_id, &text);
                         } else if let Some(voice) = message.voice {
                             handle_voice_message(&bot, chat_id, &voice);
+                        } else if let Some(doc) = message.document {
+                            handle_document(&bot, chat_id, &doc);
                         }
                     }
                 }
@@ -306,6 +317,104 @@ Keep the whole critique under 300 words."#
 
     // 7. Cleanup temp files
     AudioProcessor::cleanup(&[&ogg_path, &wav_path]);
+
+    Ok(critique)
+}
+
+fn handle_document(bot: &Bot, chat_id: i64, doc: &Document) {
+    let mime = doc.mime_type.as_deref().unwrap_or("");
+    let name = doc.file_name.as_deref().unwrap_or("");
+
+    if mime != "application/pdf" && !name.ends_with(".pdf") {
+        let _ = bot.send_message(chat_id, "📄 Send me a PDF deck and I'll critique it. (Only PDF supported.)");
+        return;
+    }
+
+    let ack = "📊 Received your deck. Reviewing...";
+    if let Err(e) = bot.send_message(chat_id, ack) {
+        eprintln!("Error sending deck acknowledgment: {}", e);
+        return;
+    }
+
+    let result = process_document(bot, doc);
+    let reply = match result {
+        Ok(critique) => critique,
+        Err(e) => {
+            eprintln!("Deck review error: {}", e);
+            format!("⚠️ Could not review deck: {}. Please try again.", e)
+        }
+    };
+
+    if let Err(e) = bot.send_message(chat_id, &reply) {
+        eprintln!("Error sending deck critique: {}", e);
+    }
+}
+
+fn process_document(bot: &Bot, doc: &Document) -> Result<String> {
+    let file_id = &doc.file_id;
+    let pdf_path = format!("/tmp/comes-deck-{}.pdf", file_id);
+    let txt_path = format!("/tmp/comes-deck-{}.txt", file_id);
+
+    // 1. Download PDF from Telegram
+    bot.download_file(file_id, &pdf_path).context("PDF download failed")?;
+
+    // 2. Extract text via pdftotext
+    let status = std::process::Command::new("pdftotext")
+        .arg(&pdf_path)
+        .arg(&txt_path)
+        .status()
+        .context("Failed to execute pdftotext — install poppler-utils")?;
+
+    if !status.success() {
+        anyhow::bail!("pdftotext failed with status: {}", status);
+    }
+
+    let text = std::fs::read_to_string(&txt_path)
+        .context("Failed to read extracted text")?;
+
+    if text.trim().is_empty() {
+        let _ = std::fs::remove_file(&pdf_path);
+        let _ = std::fs::remove_file(&txt_path);
+        anyhow::bail!("No text could be extracted — deck may be image-only");
+    }
+
+    // Truncate to ~12K chars to stay within model context
+    let truncated: String = text.chars().take(12_000).collect();
+    let was_truncated = text.len() > truncated.len();
+    let truncation_note = if was_truncated {
+        "\n\n[Note: deck was truncated to first ~12K characters for analysis]"
+    } else {
+        ""
+    };
+
+    let prompt = format!(
+        r#"You are an executive communication coach reviewing a slide deck. Critique the following extracted text from a presentation.
+
+Deck content:
+{truncated}{truncation_note}
+
+Provide a structured critique covering exactly these 5 dimensions:
+
+1. **Structure & flow** — Is there a clear narrative arc? Does it follow the Pyramid Principle (conclusion first, then support)? Is the logical flow easy to follow?
+2. **Executive clarity** — Would a non-technical C-suite exec understand this in 90 seconds? Is the key message obvious on each slide?
+3. **MECE completeness** — Are sections mutually exclusive and collectively exhaustive? Any gaps or overlaps?
+4. **Evidence & substance** — Are claims backed by data or examples? Any assertions that need support?
+5. **Action orientation** — Is there a clear ask or call to action? Does the deck drive a decision?
+
+End with: **One thing to fix first:** [single highest-impact improvement]
+
+Keep the whole critique under 350 words."#
+    );
+
+    // 3. Generate critique via LLM
+    let critique = phron::clients::llm::LlmClient::new()
+        .context("LLM client init failed")?
+        .generate("anthropic/claude-sonnet-4-5", &prompt, None)
+        .context("LLM deck critique failed")?;
+
+    // 4. Cleanup temp files
+    let _ = std::fs::remove_file(&pdf_path);
+    let _ = std::fs::remove_file(&txt_path);
 
     Ok(critique)
 }
