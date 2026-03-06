@@ -1,4 +1,7 @@
 use anyhow::{Context, Result};
+use phron::clients::audio::AudioProcessor;
+use phron::clients::llm::LlmClient;
+use phron::clients::whisper::WhisperClient;
 use phron::commands::{health, brief};
 use phron::config;
 use phron::state;
@@ -223,12 +226,86 @@ fn handle_text_command(bot: &Bot, chat_id: i64, text: &str) {
 }
 
 fn handle_voice_message(bot: &Bot, chat_id: i64, voice: &Voice) {
-    let msg = "🎙 Voice received. Audio coaching coming soon — send /help for available commands.";
-    if let Err(e) = bot.send_message(chat_id, msg) {
+    let ack = "🎙 Received. Analysing your voice...";
+    if let Err(e) = bot.send_message(chat_id, ack) {
         eprintln!("Error sending voice acknowledgment: {}", e);
+        return;
     }
 
-    if let Err(e) = bot.download_voice(&voice.file_id) {
-        eprintln!("Error downloading voice file {}: {}", voice.file_id, e);
+    let result = process_voice(bot, voice);
+    let reply = match result {
+        Ok(critique) => critique,
+        Err(e) => {
+            eprintln!("Voice processing error: {}", e);
+            format!("⚠️ Could not process audio: {}. Please try again.", e)
+        }
+    };
+
+    if let Err(e) = bot.send_message(chat_id, &reply) {
+        eprintln!("Error sending voice critique: {}", e);
     }
+}
+
+fn process_voice(bot: &Bot, voice: &Voice) -> Result<String> {
+    let file_id = &voice.file_id;
+    let ogg_path = format!("/tmp/comes-audio-{}.ogg", file_id);
+    let wav_path = format!("/tmp/comes-audio-{}.wav", file_id);
+
+    // 1. Download OGG from Telegram
+    bot.download_voice(file_id).context("Download failed")?;
+
+    // 2. Convert OGG → WAV via ffmpeg
+    AudioProcessor::convert_to_wav(&ogg_path, &wav_path)
+        .context("ffmpeg conversion failed")?;
+
+    // 3. Transcribe via Whisper API
+    let transcript = WhisperClient::new()
+        .context("Whisper client init failed")?
+        .transcribe(&wav_path)
+        .context("Whisper transcription failed")?;
+
+    // 4. Audio feature analysis via librosa (best-effort — don't fail if missing)
+    let features = AudioProcessor::analyse(&wav_path).ok();
+
+    // 5. Build critique prompt
+    let audio_context = match &features {
+        Some(f) => format!(
+            "Audio metrics: {:.0}s duration, ~{} WPM, {} pauses ({:.0}% pause ratio), pitch {:.0}Hz mean ({}variation).",
+            f.duration_seconds, f.wpm_estimate, f.pause_count,
+            f.pause_ratio * 100.0, f.pitch_mean_hz, f.pitch_variation
+        ),
+        None => "Audio metrics unavailable — critique based on transcript only.".to_string(),
+    };
+
+    let prompt = format!(
+        r#"You are an executive communication coach. Analyse this spoken answer and provide a structured critique.
+
+Transcript:
+{transcript}
+
+{audio_context}
+
+Provide a concise critique covering exactly these 5 dimensions:
+
+1. **Filler words & pace** — count fillers (um, uh, like, you know), comment on WPM if available
+2. **Structure & clarity** — is the answer-first (BLUF)? Is the logic MECE? Clear to a non-technical exec?
+3. **Executive presence** — confidence, authority, concision under pressure
+4. **Accent & pronunciation** — clarity for international audiences, any patterns to watch
+5. **Voice texture** — resonance, warmth, variation (from audio metrics if available)
+
+End with: **One thing to fix next time:** [single most impactful improvement]
+
+Keep the whole critique under 300 words."#
+    );
+
+    // 6. Generate critique via LLM
+    let critique = LlmClient::new()
+        .context("LLM client init failed")?
+        .generate("anthropic/claude-sonnet-4-5", &prompt, None)
+        .context("LLM critique failed")?;
+
+    // 7. Cleanup temp files
+    AudioProcessor::cleanup(&[&ogg_path, &wav_path]);
+
+    Ok(critique)
 }

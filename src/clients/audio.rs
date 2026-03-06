@@ -45,7 +45,8 @@ impl AudioProcessor {
     // Run scripts/audio_analysis.py via `uv run --script` subprocess
     // Returns parsed AudioFeatures or error
     pub fn analyse(wav_path: &str) -> Result<AudioFeatures> {
-        let script_path = Self::resolve_script_path()?;
+        let script_path = Self::resolve_script_path()
+            .context("Could not locate audio_analysis.py. Set PHRON_SCRIPTS_DIR env var or run from repo root.")?;
         
         let output = Command::new("uv")
             .arg("run")
@@ -74,27 +75,30 @@ impl AudioProcessor {
     }
 
     fn resolve_script_path() -> Result<PathBuf> {
-        let mut path = std::env::current_exe()
-            .context("Failed to get current executable path")?;
-        
-        // Walk up from target/release/comes to root
-        // comes -> release -> target -> root
-        for _ in 0..3 {
-            if let Some(parent) = path.parent() {
-                path = parent.to_path_buf();
-            } else {
-                anyhow::bail!("Could not find root directory from executable path");
+        // 1. Explicit env var — set this in LaunchAgent or shell for installed binary
+        if let Ok(dir) = std::env::var("PHRON_SCRIPTS_DIR") {
+            let p = PathBuf::from(dir).join("audio_analysis.py");
+            if p.exists() { return Ok(p); }
+        }
+
+        // 2. Walk up from exe — works for target/release/comes-bot (dev)
+        if let Ok(exe) = std::env::current_exe() {
+            for depth in 1..=4 {
+                let mut candidate = exe.clone();
+                for _ in 0..depth { candidate.pop(); }
+                let p = candidate.join("scripts").join("audio_analysis.py");
+                if p.exists() { return Ok(p); }
             }
         }
-        
-        let script_path = path.join("scripts").join("audio_analysis.py");
-        if !script_path.exists() {
-            // Fallback for development (target/debug/comes)
-            // Sometimes current_exe might be in target/debug/deps/ during tests
-            // but for now we follow the 3-level rule or just check if it exists
-            anyhow::bail!("Script not found at: {:?}", script_path);
-        }
-        
-        Ok(script_path)
+
+        // 3. Hardcoded repo path fallback
+        let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("audio_analysis.py");
+        if fallback.exists() { return Ok(fallback); }
+
+        anyhow::bail!(
+            "audio_analysis.py not found. Set PHRON_SCRIPTS_DIR=~/code/phron/scripts in your environment."
+        )
     }
 }
