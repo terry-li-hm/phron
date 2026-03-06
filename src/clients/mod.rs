@@ -3,3 +3,5 @@ pub mod openrouter;
 pub mod oura;
 pub mod telegram;
 pub mod vault;
+pub mod audio;
+pub mod whisper;
