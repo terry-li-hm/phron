@@ -8,9 +8,17 @@ repository = "https://github.com/terry-li-hm/phron"
 keywords = ["cli", "ai", "oura", "coach"]
 categories = ["command-line-utilities"]
 
+[lib]
+name = "phron"
+path = "src/lib.rs"
+
 [[bin]]
 name = "comes"
 path = "src/main.rs"
+
+[[bin]]
+name = "comes-bot"
+path = "bot/main.rs"
 
 [workspace]
 

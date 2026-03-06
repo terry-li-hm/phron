@@ -1,11 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use phron::commands;
+use phron::config;
+use phron::state;
 use std::process::ExitCode;
-
-mod clients;
-mod commands;
-mod config;
-mod state;
 
 #[derive(Parser, Debug)]
 #[command(name = "comes", about = "Personal AI life coach", version)]

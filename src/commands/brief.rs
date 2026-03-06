@@ -8,7 +8,7 @@ use crate::clients::vault::VaultClient;
 use crate::config::Config;
 use crate::state::State;
 
-pub fn run(config: &Config, state: &mut State) -> Result<()> {
+pub fn generate_brief(config: &Config, state: &mut State) -> Result<String> {
     let today = Local::now().format("%Y-%m-%d").to_string();
 
     // 1. Health state
@@ -75,6 +75,12 @@ Calendar:
         &prompt,
         Some("You are an executive life coach."),
     )?;
+
+    Ok(brief)
+}
+
+pub fn run(config: &Config, state: &mut State) -> Result<()> {
+    let brief = generate_brief(config, state)?;
 
     println!(
         "
