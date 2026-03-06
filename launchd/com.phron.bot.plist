@@ -8,6 +8,19 @@
     <array>
         <string>/Users/terry/.cargo/bin/comes-bot</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TELEGRAM_COMES_BOT_TOKEN</key>
+        <string>{{REPLACE_WITH_TOKEN_FROM_1PASSWORD}}</string>
+        <key>PHRON_SCRIPTS_DIR</key>
+        <string>/Users/terry/code/phron/scripts</string>
+        <key>OPENROUTER_API_KEY</key>
+        <string>{{INJECT_VIA_1PASSWORD}}</string>
+        <key>OPENAI_API_KEY</key>
+        <string>{{INJECT_VIA_1PASSWORD}}</string>
+        <key>OURA_TOKEN</key>
+        <string>{{INJECT_VIA_1PASSWORD}}</string>
+    </dict>
     <key>KeepAlive</key>
     <true/>
     <key>RunAtLoad</key>
