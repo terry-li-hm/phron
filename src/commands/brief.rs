@@ -12,10 +12,12 @@ pub fn generate_brief(config: &Config, state: &mut State) -> Result<String> {
     let today = Local::now().format("%Y-%m-%d").to_string();
 
     // 1. Health state
-    let oura = OuraClient::new()?;
-    let score = match oura.daily_readiness(&today) {
-        Ok(data) => data.first().map(|r| r.score).unwrap_or(0),
-        Err(_) => 0, // Fallback if Oura fails
+    let score = match OuraClient::new() {
+        Ok(oura) => match oura.daily_readiness(&today) {
+            Ok(data) => data.first().map(|r| r.score).unwrap_or(0),
+            Err(_) => 0,
+        },
+        Err(_) => 0,
     };
 
     let health_context = if score >= config.thresholds.health_yellow {

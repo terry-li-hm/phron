@@ -6,21 +6,33 @@ use crate::clients::oura::OuraClient;
 use crate::config::Config;
 use crate::state::State;
 
-pub fn generate_health_report(config: &Config) -> Result<String> {
-    let today = Local::now().format("%Y-%m-%d").to_string();
-
+fn fetch_metrics(today: &str) -> Result<(u32, u32, u32)> {
     let oura = OuraClient::new()?;
-    let readiness_data = oura.daily_readiness(&today)?;
-    let sleep_data = oura.daily_sleep(&today)?;
+    let readiness_data = oura.daily_readiness(today)?;
+    let sleep_data = oura.daily_sleep(today)?;
 
     let score = readiness_data.first().map(|r| r.score).unwrap_or(0);
-
     let hrv = readiness_data
         .first()
         .and_then(|r| r.contributors.hrv_balance)
         .unwrap_or(0);
-
     let sleep = sleep_data.first().map(|s| s.score).unwrap_or(0);
+
+    Ok((score, hrv, sleep))
+}
+
+pub fn generate_health_report(config: &Config) -> Result<String> {
+    let today = Local::now().format("%Y-%m-%d").to_string();
+
+    let (score, hrv, sleep) = match fetch_metrics(&today) {
+        Ok(metrics) => metrics,
+        Err(e) => {
+            return Ok(format!(
+                "Health data unavailable — Oura error: {}",
+                e
+            ));
+        }
+    };
 
     let state_text;
     let recommendation;
@@ -46,18 +58,14 @@ pub fn generate_health_report(config: &Config) -> Result<String> {
 pub fn run(config: &Config, _state: &State) -> Result<()> {
     let today = Local::now().format("%Y-%m-%d").to_string();
 
-    let oura = OuraClient::new()?;
-    let readiness_data = oura.daily_readiness(&today)?;
-    let sleep_data = oura.daily_sleep(&today)?;
-
-    let score = readiness_data.first().map(|r| r.score).unwrap_or(0);
-
-    let hrv = readiness_data
-        .first()
-        .and_then(|r| r.contributors.hrv_balance)
-        .unwrap_or(0);
-
-    let sleep = sleep_data.first().map(|s| s.score).unwrap_or(0);
+    let (score, hrv, sleep) = match fetch_metrics(&today) {
+        Ok(metrics) => metrics,
+        Err(e) => {
+            eprintln!("Oura data unavailable: {}", e);
+            println!("Health data unavailable — readiness and sleep could not be loaded.");
+            return Ok(());
+        }
+    };
 
     let state_text;
     let recommendation;
