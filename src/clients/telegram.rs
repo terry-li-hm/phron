@@ -46,13 +46,62 @@ impl TelegramClient {
         }
 
         let tg_resp: TelegramResponse = resp.json()?;
-        if !tg_resp.ok {
-            bail!(
-                "Telegram returned ok=false: {}",
-                tg_resp.description.unwrap_or_default()
-            );
-        }
+        require_telegram_ok(tg_resp)
+    }
+}
 
-        Ok(())
+fn require_telegram_ok(tg_resp: TelegramResponse) -> Result<()> {
+    if !tg_resp.ok {
+        bail!(
+            "Telegram returned ok=false: {}",
+            tg_resp.description.unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ok_true_succeeds() {
+        let resp: TelegramResponse = serde_json::from_str(r#"{"ok": true}"#).unwrap();
+        require_telegram_ok(resp).unwrap();
+    }
+
+    #[test]
+    fn ok_false_with_description_errors() {
+        let resp: TelegramResponse =
+            serde_json::from_str(r#"{"ok": false, "description": "Forbidden"}"#).unwrap();
+        let err = require_telegram_ok(resp).unwrap_err();
+        assert!(err.to_string().contains("Forbidden"));
+        assert!(err.to_string().contains("ok=false"));
+    }
+
+    #[test]
+    fn ok_false_without_description_uses_empty_string() {
+        let resp: TelegramResponse = serde_json::from_str(r#"{"ok": false}"#).unwrap();
+        let err = require_telegram_ok(resp).unwrap_err();
+        assert_eq!(err.to_string(), "Telegram returned ok=false: ");
+    }
+
+    #[test]
+    fn extra_fields_are_ignored() {
+        let resp: TelegramResponse =
+            serde_json::from_str(r#"{"ok": true, "result": {"message_id": 1}}"#).unwrap();
+        require_telegram_ok(resp).unwrap();
+    }
+
+    #[test]
+    fn missing_ok_field_errors() {
+        let parsed: Result<TelegramResponse, _> = serde_json::from_str(r#"{"description": "x"}"#);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn malformed_json_errors() {
+        let parsed: Result<TelegramResponse, _> = serde_json::from_str("not-json");
+        assert!(parsed.is_err());
     }
 }

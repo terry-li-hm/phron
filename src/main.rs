@@ -51,3 +51,50 @@ fn run() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{error::ErrorKind, Parser};
+
+    #[test]
+    fn parses_each_subcommand() {
+        for (args, expected) in [
+            (["comes", "health"], "Health"),
+            (["comes", "brief"], "Brief"),
+            (["comes", "nudge"], "Nudge"),
+            (["comes", "overnight"], "Overnight"),
+            (["comes", "status"], "Status"),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert_eq!(format!("{:?}", cli.command), expected);
+        }
+    }
+
+    #[test]
+    fn missing_subcommand_errors() {
+        let err = Cli::try_parse_from(["comes"]).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+    }
+
+    #[test]
+    fn unknown_subcommand_errors() {
+        let err = Cli::try_parse_from(["comes", "nope"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn help_flag_is_display_help() {
+        let err = Cli::try_parse_from(["comes", "--help"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::DisplayHelp);
+    }
+
+    #[test]
+    fn version_flag_is_display_version() {
+        let err = Cli::try_parse_from(["comes", "--version"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::DisplayVersion);
+    }
+}

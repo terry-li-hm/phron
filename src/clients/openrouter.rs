@@ -42,10 +42,6 @@ impl OpenRouterClient {
         }
 
         let data: serde_json::Value = resp.json()?;
-        let content = data["choices"][0]["message"]["content"]
-            .as_str()
-            .context("Missing content in OpenRouter response")?;
-
-        Ok(content.to_string())
+        super::extract_chat_content(&data)
     }
 }
