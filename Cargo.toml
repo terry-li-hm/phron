@@ -20,8 +20,6 @@ path = "src/main.rs"
 name = "comes-bot"
 path = "bot/main.rs"
 
-[workspace]
-
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", features = ["blocking", "json", "multipart"] }

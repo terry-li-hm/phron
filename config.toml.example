@@ -3,8 +3,8 @@ path = "~/notes"
 overnight_dir = "Daily Intelligence"
 
 [llm]
-synthesis_model = "claude-sonnet-4-6"
-research_model = "google/gemini-flash-1.5"
+synthesis_model = "anthropic/claude-sonnet-4-6"
+research_model = "google/gemini-2.0-flash-001"
 
 [research]
 topics = [
