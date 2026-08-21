@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Eq, Clone)]
 pub struct State {
+    #[serde(default)]
     pub last_overnight_run: Option<NaiveDate>,
+    #[serde(default)]
     pub health_history: Vec<HealthEntry>,
 }
 
@@ -77,11 +79,9 @@ mod tests {
     }
 
     #[test]
-    fn empty_object_parses_with_serde_defaults_for_option() {
+    fn empty_object_parses_with_serde_defaults() {
         let state = parse_state("{}");
-        // Missing Option may deserialize as None; missing Vec fails and falls back
-        // to Default. Encode whichever current serde behavior produces.
-        assert_eq!(state.health_history, Vec::<HealthEntry>::new());
+        assert_eq!(state, State::default());
     }
 
     #[test]
@@ -102,16 +102,20 @@ mod tests {
     }
 
     #[test]
-    fn missing_health_history_returns_default_and_drops_last_run() {
-        // BUG: a partial/legacy file without health_history fails Deserialize,
-        // then unwrap_or_else yields Default and silently drops last_overnight_run.
+    fn missing_health_history_keeps_last_run() {
         let json = r#"{"last_overnight_run": "2026-01-15"}"#;
         let state = parse_state(json);
-        assert_eq!(
-            state,
-            State::default(),
-            "missing health_history currently wipes last_overnight_run"
-        );
+        assert_eq!(state.last_overnight_run, Some(date(2026, 1, 15)));
+        assert!(state.health_history.is_empty());
+    }
+
+    #[test]
+    fn missing_last_overnight_run_keeps_health_history() {
+        let json = r#"{"health_history": [{"date": "2026-01-14", "score": 82}]}"#;
+        let state = parse_state(json);
+        assert_eq!(state.last_overnight_run, None);
+        assert_eq!(state.health_history.len(), 1);
+        assert_eq!(state.health_history[0].score, 82);
     }
 
     #[test]
@@ -183,6 +187,17 @@ mod tests {
         fs::write(&path, "{{{{").unwrap();
         let loaded = load_state_from(&path).unwrap();
         assert_eq!(loaded, State::default());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_file_without_health_history_keeps_last_run() {
+        let dir = crate::test_support::temp_dir();
+        let path = dir.join("state.json");
+        fs::write(&path, r#"{"last_overnight_run": "2026-01-15"}"#).unwrap();
+        let loaded = load_state_from(&path).unwrap();
+        assert_eq!(loaded.last_overnight_run, Some(date(2026, 1, 15)));
+        assert!(loaded.health_history.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 }
