@@ -8,6 +8,23 @@ use crate::clients::vault::VaultClient;
 use crate::config::Config;
 use crate::state::State;
 
+fn already_ran_today(last_run: Option<chrono::NaiveDate>, today: chrono::NaiveDate) -> bool {
+    last_run == Some(today)
+}
+
+fn preview_digest(final_digest: &str) -> String {
+    if final_digest.len() > 2000 {
+        format!(
+            "{}...
+
+[Truncated, full digest in Vault]",
+            &final_digest[..2000]
+        )
+    } else {
+        final_digest.to_string()
+    }
+}
+
 fn send_alert_and_exit(msg: &str) -> ! {
     if let Ok(tg) = TelegramClient::new() {
         let _ = tg.send_message(msg);
@@ -19,11 +36,9 @@ fn send_alert_and_exit(msg: &str) -> ! {
 pub fn run(config: &Config, state: &mut State) -> Result<()> {
     let today = Local::now().date_naive();
 
-    if let Some(last_run) = state.last_overnight_run {
-        if last_run == today {
-            println!("Overnight agent already ran today. Exiting.");
-            return Ok(());
-        }
+    if already_ran_today(state.last_overnight_run, today) {
+        println!("Overnight agent already ran today. Exiting.");
+        return Ok(());
     }
 
     let openrouter = OpenRouterClient::new().unwrap_or_else(|e| {
@@ -120,16 +135,7 @@ Research material:
         ));
     }
 
-    let preview = if final_digest.len() > 2000 {
-        format!(
-            "{}...
-
-[Truncated, full digest in Vault]",
-            &final_digest[..2000]
-        )
-    } else {
-        final_digest.clone()
-    };
+    let preview = preview_digest(&final_digest);
 
     let tg_message = format!(
         "<b>🌙 Overnight Intelligence Digest - {}</b>
@@ -149,4 +155,71 @@ Research material:
     println!("Overnight research complete.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn already_ran_when_same_day() {
+        let today = date(2026, 8, 21);
+        assert!(already_ran_today(Some(today), today));
+    }
+
+    #[test]
+    fn not_already_ran_when_different_day() {
+        assert!(!already_ran_today(
+            Some(date(2026, 8, 20)),
+            date(2026, 8, 21)
+        ));
+    }
+
+    #[test]
+    fn not_already_ran_when_never() {
+        assert!(!already_ran_today(None, date(2026, 8, 21)));
+    }
+
+    #[test]
+    fn preview_leaves_short_digest_unchanged() {
+        assert_eq!(preview_digest("short"), "short");
+        assert_eq!(preview_digest(""), "");
+    }
+
+    #[test]
+    fn preview_does_not_truncate_exactly_2000_bytes() {
+        let digest = "a".repeat(2000);
+        assert_eq!(preview_digest(&digest), digest);
+    }
+
+    #[test]
+    fn preview_truncates_ascii_over_2000_bytes() {
+        let digest = "a".repeat(2001);
+        let preview = preview_digest(&digest);
+        assert!(preview.starts_with(&"a".repeat(2000)));
+        assert!(preview.contains("[Truncated, full digest in Vault]"));
+        assert!(preview.contains("..."));
+    }
+
+    #[test]
+    fn preview_panics_when_byte_2000_is_not_a_char_boundary() {
+        // BUG: preview_digest slices at byte 2000. A 3-byte char starting at
+        // index 1999 makes 2000 a non-boundary and panics.
+        let mut digest = "a".repeat(1999);
+        digest.push('你');
+        assert!(digest.len() > 2000);
+        assert!(!digest.is_char_boundary(2000));
+
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| preview_digest(&digest)));
+        assert!(
+            result.is_err(),
+            "expected panic when truncating through a multibyte character"
+        );
+    }
 }

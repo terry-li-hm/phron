@@ -8,6 +8,10 @@ use crate::clients::oura::OuraClient;
 use crate::clients::telegram::TelegramClient;
 use crate::config::Config;
 
+fn should_nudge(score: u32, health_red: u32) -> bool {
+    score > 0 && score < health_red
+}
+
 fn log_action(msg: &str) {
     if let Some(home) = dirs::home_dir() {
         let log_path = home.join("logs").join("comes-nudge.log");
@@ -39,7 +43,7 @@ pub fn run(config: &Config) -> Result<()> {
 
     let score = readiness_data.first().map(|r| r.score).unwrap_or(0);
 
-    if score > 0 && score < config.thresholds.health_red {
+    if should_nudge(score, config.thresholds.health_red) {
         log_action(&format!(
             "Red state detected (score: {}). Triggering nudges.",
             score
@@ -84,4 +88,35 @@ pub fn run(config: &Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nudges_strictly_below_red_and_above_zero() {
+        assert!(should_nudge(1, 50));
+        assert!(should_nudge(49, 50));
+    }
+
+    #[test]
+    fn does_not_nudge_at_or_above_red() {
+        assert!(!should_nudge(50, 50));
+        assert!(!should_nudge(70, 50));
+    }
+
+    #[test]
+    fn does_not_nudge_zero_score() {
+        // Missing Oura data becomes 0 and is treated as "no nudge".
+        assert!(!should_nudge(0, 50));
+        assert!(!should_nudge(0, 1));
+        assert!(!should_nudge(0, 0));
+    }
+
+    #[test]
+    fn red_threshold_zero_never_nudges() {
+        assert!(!should_nudge(1, 0));
+        assert!(!should_nudge(u32::MAX, 0));
+    }
 }
